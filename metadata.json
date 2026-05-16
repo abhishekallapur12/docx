@@ -1,0 +1,8 @@
+{
+  "name": "DocuFlow AI",
+  "description": "Enterprise-grade document automation platform with automated template extraction and bulk Excel processing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
