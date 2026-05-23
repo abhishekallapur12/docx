@@ -73,6 +73,109 @@ function formatExcelSerialDate(value: number) {
   return `${day}-${month}-${year}`;
 }
 
+function sanitizeNumberValue(value: unknown) {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string') return NaN;
+  const cleaned = value.replace(/[₹,\s]/g, '').replace(/[^0-9.-]/g, '');
+  return Number(cleaned);
+}
+
+function numberToIndianWords(value: number) {
+  const units = [
+    'Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen',
+    'Eighteen', 'Nineteen'
+  ];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  const twoDigits = (n: number) => {
+    if (n < 20) return units[n];
+    const ten = Math.floor(n / 10);
+    const unit = n % 10;
+    return `${tens[ten]}${unit ? ` ${units[unit]}` : ''}`.trim();
+  };
+
+  const threeDigits = (n: number) => {
+    const hundred = Math.floor(n / 100);
+    const remainder = n % 100;
+    if (hundred && remainder) return `${units[hundred]} Hundred ${twoDigits(remainder)}`;
+    if (hundred) return `${units[hundred]} Hundred`;
+    return twoDigits(remainder);
+  };
+
+  if (value === 0) return 'Zero';
+
+  const crore = Math.floor(value / 10000000);
+  value %= 10000000;
+  const lakh = Math.floor(value / 100000);
+  value %= 100000;
+  const thousand = Math.floor(value / 1000);
+  value %= 1000;
+  const hundred = Math.floor(value / 100);
+  const remainder = value % 100;
+
+  const parts: string[] = [];
+  if (crore) parts.push(`${numberToIndianWords(crore)} Crore`);
+  if (lakh) parts.push(`${numberToIndianWords(lakh)} Lakh`);
+  if (thousand) parts.push(`${numberToIndianWords(thousand)} Thousand`);
+  if (hundred) parts.push(`${units[hundred]} Hundred`);
+  if (remainder) parts.push(twoDigits(remainder));
+
+  return parts.join(' ').trim();
+}
+
+function formatRupeesInWords(value: unknown) {
+  const num = sanitizeNumberValue(value);
+  if (Number.isNaN(num)) return String(value ?? '');
+
+  const absolute = Math.abs(num);
+  const integerPart = Math.floor(absolute);
+  const paise = Math.round((absolute - integerPart) * 100);
+  const rupeeText = numberToIndianWords(integerPart);
+  const paiseText = paise ? `${numberToIndianWords(paise)} Paise` : '';
+  const sign = num < 0 ? 'Minus ' : '';
+
+  if (paiseText) {
+    return `${sign}Rupees ${rupeeText} and ${paiseText} only`;
+  }
+  return `${sign}Rupees ${rupeeText} only`;
+}
+
+function formatIndianNumber(value: unknown) {
+  const rawValue = typeof value === 'string' ? value.trim() : String(value ?? '');
+  const cleaned = rawValue.replace(/[₹,\s]/g, '').replace(/[^0-9.-]/g, '');
+  if (!cleaned || cleaned === '-' || cleaned === '.') return String(value ?? '');
+
+  const isNegative = cleaned.startsWith('-');
+  const absolute = cleaned.replace(/^-/, '');
+  const [intPart, decimalPart] = absolute.split('.');
+
+  const group = (digits: string) => {
+    if (digits.length <= 3) return digits;
+    const lastThree = digits.slice(-3);
+    const remaining = digits.slice(0, -3);
+    return `${remaining.replace(/\B(?=(?:\d{2})+(?!\d))/g, ',')},${lastThree}`;
+  };
+
+  const formattedInt = group(intPart || '0');
+  return `${isNegative ? '-' : ''}${formattedInt}${decimalPart ? `.${decimalPart}` : ''}`;
+}
+
+function isAmountWordsPlaceholder(placeholder: string) {
+  const normalized = placeholder.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return /(amount|rupee|rupees|rs|total|price)/.test(normalized) && /(?:_?in_?words|_?words|_?text)$/.test(normalized);
+}
+
+function isAmountValuePlaceholder(placeholder: string) {
+  const normalized = placeholder.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return /(amount|rupee|rupees|rs|total|price)/.test(normalized);
+}
+
+function isAmountValueColumn(column: string) {
+  const normalized = column.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return /(amount|rupee|rupees|rs|total|price)/.test(normalized);
+}
+
 function normalizeTemplateObjectPath(filename: string) {
   return filename.includes("/") ? filename : `templates/${filename}`;
 }
@@ -386,8 +489,13 @@ async function startServer() {
               const val = row[column as string];
               const displayVal = displayRow?.[column as string];
               const displayedDate = normalizeDisplayedDate(displayVal);
+
               if (displayedDate) {
                 data[placeholder] = displayedDate;
+              } else if (isAmountWordsPlaceholder(placeholder)) {
+                data[placeholder] = formatRupeesInWords(val);
+              } else if (isAmountValuePlaceholder(placeholder) || isAmountValueColumn(column as string)) {
+                data[placeholder] = formatIndianNumber(val);
               } else if (typeof val === 'number' && val > 30000 && val < 60000) {
                 // Handle Excel serial dates that weren't automatically converted to Date objects
                 try {
